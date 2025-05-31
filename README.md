@@ -23,8 +23,8 @@ Provides a web interface for scanning, connecting, and managing WiFi credentials
 ### 1. Clone and configure
 
 ```sh
-git clone https://github.com/yourusername/esp32-wifi-manager.git
-cd esp32-wifi-manager
+git clone https://github.com/Sedowan/WIFI_Manager.git
+cd WIFI_Manager
 ```
 
 ### 2. Install ESP-IDF (if not done)
