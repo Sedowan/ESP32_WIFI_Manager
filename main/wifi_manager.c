@@ -1,0 +1,318 @@
+#include "wifi_manager.h"
+#include "esp_wifi.h"
+#include "esp_log.h"
+#include "esp_netif.h"
+#include "esp_event.h"
+#include "mdns.h"
+#include "nvs_flash.h"
+#include "nvs.h"
+#include "cJSON.h"
+#include <string.h>
+#include <stdlib.h>
+
+#define WIFI_NAMESPACE "wifi_creds"
+#define MAX_SSID_LEN 32
+#define MAX_PASS_LEN 64
+
+static const char* TAG = "wifi_man";
+static char saved_ssid[MAX_SSID_LEN];
+static char saved_pass[MAX_PASS_LEN];
+
+/**
+ * @brief Check if WiFi credentials exist in NVS and load them if present.
+ * @return true if credentials are found, false otherwise.
+ */
+bool wifi_manager_wifi_credentials_exist(void) {
+    nvs_handle_t nvs;
+    size_t len;
+    esp_err_t err = nvs_open(WIFI_NAMESPACE, NVS_READONLY, &nvs);
+    if (err != ESP_OK) return false;
+
+    len = sizeof(saved_ssid);
+    err = nvs_get_str(nvs, "wifi_ssid", saved_ssid, &len);
+    if (err != ESP_OK) {
+        nvs_close(nvs);
+        return false;
+    }
+
+    len = sizeof(saved_pass);
+    err = nvs_get_str(nvs, "wifi_pass", saved_pass, &len);
+    nvs_close(nvs);
+    return err == ESP_OK;
+}
+
+/**
+ * @brief Save WiFi credentials (SSID and password) to NVS.
+ */
+void wifi_manager_save_wifi_credentials(const char* ssid, const char* password) {
+    nvs_handle_t nvs;
+    if (nvs_open(WIFI_NAMESPACE, NVS_READWRITE, &nvs) == ESP_OK) {
+        nvs_set_str(nvs, "wifi_ssid", ssid);
+        nvs_set_str(nvs, "wifi_pass", password);
+        nvs_commit(nvs);
+        nvs_close(nvs);
+        ESP_LOGI(TAG, "WiFi credentials saved: SSID='%s'", ssid);
+    } else {
+        ESP_LOGE(TAG, "Failed to save WiFi credentials.");
+    }
+}
+
+/**
+ * @brief Delete WiFi credentials from NVS.
+ */
+void wifi_manager_delete_wifi_credentials(void) {
+    nvs_handle_t nvs_handle;
+    esp_err_t err = nvs_open(WIFI_NAMESPACE, NVS_READWRITE, &nvs_handle);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to open NVS: %s", esp_err_to_name(err));
+        return;
+    }
+
+    err = nvs_erase_key(nvs_handle, "wifi_ssid");
+    if (err != ESP_OK && err != ESP_ERR_NVS_NOT_FOUND) {
+        ESP_LOGW(TAG, "Failed to erase SSID: %s", esp_err_to_name(err));
+    }
+
+    err = nvs_erase_key(nvs_handle, "wifi_pass");
+    if (err != ESP_OK && err != ESP_ERR_NVS_NOT_FOUND) {
+        ESP_LOGW(TAG, "Failed to erase password: %s", esp_err_to_name(err));
+    }
+
+    err = nvs_commit(nvs_handle);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "NVS commit failed: %s", esp_err_to_name(err));
+    } else {
+        ESP_LOGI(TAG, "WiFi credentials deleted.");
+    }
+
+    nvs_close(nvs_handle);
+}
+
+/**
+ * @brief Initialize the ESP32 as a WiFi station (client) and connect to the given SSID.
+ */
+void wifi_manager_connect_sta(const char *ssid, const char *password) {
+    esp_netif_create_default_wifi_sta();
+    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
+    esp_wifi_init(&cfg);
+
+    wifi_config_t wifi_config = {0};
+    strncpy((char*)wifi_config.sta.ssid, ssid, sizeof(wifi_config.sta.ssid));
+    strncpy((char*)wifi_config.sta.password, password, sizeof(wifi_config.sta.password));
+
+    esp_wifi_set_mode(WIFI_MODE_STA);
+    esp_wifi_set_config(WIFI_IF_STA, &wifi_config);
+    esp_wifi_start();
+    esp_wifi_connect();
+
+    ESP_LOGI(TAG, "Started in STA mode with SSID: %s", ssid);
+}
+
+/**
+ * @brief Start the ESP32 as a WiFi Access Point for configuration.
+ */
+void wifi_manager_start_ap(void) {
+    esp_netif_create_default_wifi_ap();
+    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
+    esp_wifi_init(&cfg);
+    wifi_config_t ap_config = {
+        .ap = {
+            .ssid = "ESP32-AP",
+            .ssid_len = 8,
+            .password = "esp32pass",
+            .max_connection = 4,
+            .authmode = WIFI_AUTH_WPA_WPA2_PSK
+        }
+    };
+    esp_wifi_set_mode(WIFI_MODE_AP);
+    esp_wifi_set_config(WIFI_IF_AP, &ap_config);
+    esp_wifi_start();
+    ESP_LOGI(TAG, "Started in AP mode: SSID: ESP32-AP, PASS: esp32pass");
+}
+
+/**
+ * @brief Initialize mDNS responder with a given hostname.
+ */
+void wifi_manager_mdns_init(const char* hostname) {
+    if (mdns_init() == ESP_OK) {
+        mdns_hostname_set(hostname);
+        mdns_instance_name_set("ESP32 Web Server");
+        ESP_LOGI(TAG, "mDNS started: %s.local", hostname);
+    } else {
+        ESP_LOGE(TAG, "mDNS initialization failed");
+    }
+}
+
+/**
+ * @brief Initialize the WiFi manager: decide mode (STA/AP) based on credentials.
+ */
+void wifi_manager_init(void) {
+    esp_netif_init();
+    esp_event_loop_create_default();
+
+    if (wifi_manager_wifi_credentials_exist()) {
+        wifi_manager_connect_sta(saved_ssid, saved_pass);
+    } else {
+        wifi_manager_start_ap();
+    }
+}
+
+/**
+ * @brief HTTP handler: scan for available WiFi networks and respond with JSON array.
+ */
+esp_err_t wifi_manager_scan_get_wifi_handler(httpd_req_t *req) {
+    uint16_t ap_num = 0;
+    wifi_ap_record_t *ap_records = NULL;
+
+    esp_wifi_scan_start(NULL, true);
+    esp_wifi_scan_get_ap_num(&ap_num);
+
+    ap_records = malloc(sizeof(wifi_ap_record_t) * ap_num);
+    if (!ap_records) return ESP_ERR_NO_MEM;
+
+    esp_wifi_scan_get_ap_records(&ap_num, ap_records);
+
+    cJSON *root = cJSON_CreateArray();
+    for (int i = 0; i < ap_num; i++) {
+        cJSON *item = cJSON_CreateObject();
+        cJSON_AddStringToObject(item, "ssid", (const char*)ap_records[i].ssid);
+        cJSON_AddNumberToObject(item, "rssi", ap_records[i].rssi);
+        cJSON_AddBoolToObject(item, "secure", ap_records[i].authmode != WIFI_AUTH_OPEN);
+        cJSON_AddItemToArray(root, item);
+    }
+
+    const char *json_str = cJSON_PrintUnformatted(root);
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, json_str, strlen(json_str));
+
+    free(ap_records);
+    cJSON_Delete(root);
+    free((void*)json_str);
+    return ESP_OK;
+}
+
+/**
+ * @brief Try to connect to the specified WiFi network and return the connection result.
+ * Used for connection test before saving credentials.
+ */
+esp_err_t wifi_manager_wifi_connect_test(const char *ssid, const char *password) {
+    ESP_LOGI(TAG, "Testing connection to SSID: %s", ssid);
+
+    wifi_manager_connect_sta(ssid, password);
+    vTaskDelay(pdMS_TO_TICKS(3000)); // Wait for connection attempt
+
+    wifi_ap_record_t info;
+    if (esp_wifi_sta_get_ap_info(&info) == ESP_OK) {
+        ESP_LOGI(TAG, "Connection successful");
+        return ESP_OK;
+    } else {
+        ESP_LOGW(TAG, "Connection failed");
+        esp_wifi_stop();
+        return ESP_FAIL;
+    }
+}
+
+/**
+ * @brief HTTP POST handler for WiFi credentials.
+ * Receives form data, tests connection, and saves credentials if successful.
+ */
+esp_err_t wifi_manager_post_wifi_handler(httpd_req_t *req) {
+    char buf[256];
+    int ret, remaining = req->content_len;
+
+    while (remaining > 0) {
+        if ((ret = httpd_req_recv(req, buf, MIN(remaining, sizeof(buf)))) <= 0) {
+            return ESP_FAIL;
+        }
+        remaining -= ret;
+        buf[ret] = '\0';
+    }
+
+    char ssid[64] = {0};
+    char password[64] = {0};
+    char *ssid_ptr = strstr(buf, "ssid=");
+    char *pass_ptr = strstr(buf, "password=");
+
+    if (ssid_ptr) {
+        ssid_ptr += strlen("ssid=");
+        char *end = strchr(ssid_ptr, '&');
+        if (end) *end = '\0';
+        strncpy(ssid, ssid_ptr, sizeof(ssid) - 1);
+    }
+
+    if (pass_ptr) {
+        pass_ptr += strlen("password=");
+        strncpy(password, pass_ptr, sizeof(password) - 1);
+    }
+
+    ESP_LOGI(TAG, "Received: SSID='%s', Password='%s'", ssid, password);
+
+    esp_err_t result = wifi_manager_wifi_connect_test(ssid, password);
+
+    if (result == ESP_OK) {
+        wifi_manager_save_wifi_credentials(ssid, password);
+        httpd_resp_send(req, "Connection successful. Credentials saved.", HTTPD_RESP_USE_STRLEN);
+    } else {
+        httpd_resp_send(req, "Connection failed. Please check your credentials.", HTTPD_RESP_USE_STRLEN);
+    }
+
+    return result;
+}
+
+/**
+ * @brief HTTP POST handler to reset (delete) WiFi credentials from NVS.
+ */
+esp_err_t wifi_manager_post_wifi_reset_handler(httpd_req_t *req)
+{
+    nvs_handle_t nvs_handle;
+    esp_err_t err = nvs_open(WIFI_NAMESPACE, NVS_READWRITE, &nvs_handle);
+
+    if (err == ESP_OK) {
+        wifi_manager_delete_wifi_credentials();
+        nvs_close(nvs_handle);
+        ESP_LOGI(TAG, "WiFi credentials reset.");
+        httpd_resp_send(req, "Credentials deleted. Please reboot.", HTTPD_RESP_USE_STRLEN);
+        return ESP_OK;
+    } else {
+        ESP_LOGE(TAG, "Failed to open NVS: %s", esp_err_to_name(err));
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
+}
+
+/**
+ * @brief HTTP GET handler to report current WiFi status (mode, SSID, IP, connection status).
+ */
+esp_err_t wifi_manager_get_wifi_status_handler(httpd_req_t *req) {
+    wifi_mode_t mode;
+    wifi_config_t conf;
+    char ip[16] = "0.0.0.0";
+    bool connected = false;
+
+    // Get WiFi mode (station/AP)
+    esp_wifi_get_mode(&mode);
+    esp_wifi_get_config(ESP_IF_WIFI_STA, &conf);
+
+    // Get current IP address (if available)
+    esp_netif_ip_info_t ip_info;
+    esp_netif_t *netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+    if (netif && esp_netif_get_ip_info(netif, &ip_info) == ESP_OK) {
+        snprintf(ip, sizeof(ip), IPSTR, IP2STR(&ip_info.ip));
+        connected = ip_info.ip.addr != 0;
+    }
+
+    // Build JSON response
+    cJSON *root = cJSON_CreateObject();
+    cJSON_AddStringToObject(root, "mode", mode == WIFI_MODE_STA ? "station" : "accesspoint");
+    cJSON_AddStringToObject(root, "ssid", (const char *)conf.sta.ssid);
+    cJSON_AddStringToObject(root, "ip", ip);
+    cJSON_AddBoolToObject(root, "connected", connected);
+    const char *response = cJSON_Print(root);
+
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, response, HTTPD_RESP_USE_STRLEN);
+    free((void *)response);
+    cJSON_Delete(root);
+
+    return ESP_OK;
+}
