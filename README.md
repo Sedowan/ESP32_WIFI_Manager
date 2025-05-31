@@ -112,3 +112,4 @@ See [LICENSE](LICENSE) for details.
 - [Espressif ESP-IDF](https://github.com/espressif/esp-idf)
 - [cJSON](https://github.com/DaveGamble/cJSON)
 - [espressif/mdns](https://github.com/espressif/esp-protocols/tree/master/components/mdns)
+- [ChatGPT](https://chatgpt.com/)
