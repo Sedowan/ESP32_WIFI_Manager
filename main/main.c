@@ -7,6 +7,7 @@
 #include "wifi_manager.h"
 #include "web.h"
 
+static const char* TAG = "Main";
 /**
  * @brief Main application entry point. Initializes NVS, networking, starts WiFi manager and web server.
  */
