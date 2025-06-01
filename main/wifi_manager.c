@@ -12,10 +12,10 @@
 #include <string.h>
 #include <stdlib.h>
 
-#define WIFI_MANAGER_STA_ATTEMPT_DURATION_MS     (3 * 60 * 1000) // 3 minutes
-#define WIFI_MANAGER_AP_IDLE_TIMEOUT_MS          (2 * 60 * 1000) // 2 minutes
-#define WIFI_MANAGER_AP_CLIENT_CHECK_INTERVAL_MS (5 * 1000)      // 5 seconds
-
+#define WIFI_MANAGER_STA_ATTEMPT_DURATION_MS     (3 * 60 * 1000) // 3 minutes in AP-Mode
+#define WIFI_MANAGER_AP_IDLE_TIMEOUT_MS          (2 * 60 * 1000) // 2 minutes in STA-Mode
+#define WIFI_MANAGER_AP_CLIENT_CHECK_INTERVAL_MS (5 * 1000)      // 5 seconds interval to check clients connected in AP-Mode
+#define WIFI_MANAGER_STA_RECONNECT_TIMEOUT_SEC   (60)            // 60 seconds to check if still connected while in STA-Mode   
 #define WIFI_NAMESPACE "wifi_creds"
 #define MAX_SSID_LEN 32
 #define MAX_PASS_LEN 64
@@ -97,6 +97,11 @@ void wifi_manager_delete_wifi_credentials(void) {
  * @brief Connects the ESP32 to a WiFi network in STA (client) mode.
  */
 void wifi_manager_connect_sta(const char *ssid, const char *password) {
+    
+    esp_wifi_stop();       // Safe to call, even when not running
+    esp_wifi_deinit();     // Safe to call, resets WIFI-drivers
+    
+    
     esp_netif_create_default_wifi_sta();
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
     esp_wifi_init(&cfg);
@@ -117,6 +122,10 @@ void wifi_manager_connect_sta(const char *ssid, const char *password) {
  * @brief Starts the ESP32 in Access Point (AP) mode.
  */
 void wifi_manager_start_ap(void) {
+    
+    esp_wifi_stop();       // Safe to call, even when not running
+    esp_wifi_deinit();     // Safe to call, resets WIFI-drivers
+    
     esp_netif_create_default_wifi_ap();
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
     esp_wifi_init(&cfg);
@@ -179,9 +188,29 @@ static void wifi_manager_main_task(void *pvParameters) {
             }
 
             if (connected) {
-                // Stay in STA mode
-                vTaskDelay(pdMS_TO_TICKS(60 * 60 * 1000));
-                continue;
+                // Monitor STA connection: restart cycle if disconnected for too long
+                int lost_seconds = 0;
+                const int RECONNECT_TIMEOUT = WIFI_MANAGER_STA_RECONNECT_TIMEOUT_SEC;
+                while (1) {
+                    wifi_ap_record_t info;
+                    if (esp_wifi_sta_get_ap_info(&info) == ESP_OK) {
+                        // Still connected
+                        lost_seconds = 0;
+                    } else {
+                        // Connection lost!
+                        lost_seconds++;
+                        ESP_LOGW(TAG, "WiFi connection lost for %d seconds.", lost_seconds);
+                        if (lost_seconds >= RECONNECT_TIMEOUT) {
+                            ESP_LOGW(TAG, "Connection lost > %d seconds. Restarting AP/STA cycle...", RECONNECT_TIMEOUT);
+                            esp_wifi_disconnect();
+                            esp_wifi_stop();
+                            esp_wifi_deinit();
+                            break; // Return to main state machine: try STA again, then AP, etc.
+                        }
+                    }
+                    vTaskDelay(pdMS_TO_TICKS(1000)); // Check every second
+                }
+                continue; // Loop back to main state machine
             }
 
             ESP_LOGW(TAG, "STA connection failed. Switching to AP mode for user intervention.");
