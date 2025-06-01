@@ -12,10 +12,6 @@
 #include <string.h>
 #include <stdlib.h>
 
-#define WIFI_MANAGER_STA_ATTEMPT_DURATION_MS     (3 * 60 * 1000) // 3 minutes
-#define WIFI_MANAGER_AP_IDLE_TIMEOUT_MS          (2 * 60 * 1000) // 2 minutes
-#define WIFI_MANAGER_AP_CLIENT_CHECK_INTERVAL_MS (5 * 1000)      // 5 seconds
-
 #define WIFI_MANAGER_STA_ATTEMPT_DURATION_MS     (3 * 60 * 1000) // 3 minutes in AP-Mode
 #define WIFI_MANAGER_AP_IDLE_TIMEOUT_MS          (2 * 60 * 1000) // 2 minutes in STA-Mode
 #define WIFI_MANAGER_AP_CLIENT_CHECK_INTERVAL_MS (5 * 1000)      // 5 seconds interval to check clients connected in AP-Mode
@@ -192,9 +188,6 @@ static void wifi_manager_main_task(void *pvParameters) {
             }
 
             if (connected) {
-                // Stay in STA mode
-                vTaskDelay(pdMS_TO_TICKS(60 * 60 * 1000));
-                continue;
                 // Monitor STA connection: restart cycle if disconnected for too long
                 int lost_seconds = 0;
                 const int RECONNECT_TIMEOUT = WIFI_MANAGER_STA_RECONNECT_TIMEOUT_SEC;
