@@ -1,6 +1,6 @@
 # ESP32 WiFi Manager
 
-A minimal, responsive WiFi configuration manager for ESP32-C6 (and compatible ESP-IDF boards).  
+A minimal, responsive WiFi configuration manager for ESP32-C6 (and compatible ESP-IDF boards) based on Espressif v5.2.2.  
 Provides a web interface for scanning, connecting, and managing WiFi credentials – all without recompiling firmware!
 
 ---
