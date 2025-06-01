@@ -76,6 +76,12 @@ void wifi_manager_save_wifi_credentials(const char* ssid, const char* password);
 void wifi_manager_delete_wifi_credentials(void);
 
 /**
+ * @brief The main WiFi state/task machine. Handles STA/AP switching and all timing logic.
+ * Keeps AP mode active as long as a client is connected.
+ */
+void wifi_manager_start_main_task(void);
+
+/**
  * @brief Attempts to connect to a WiFi network to test the given credentials.
  *
  * @param ssid SSID to test
