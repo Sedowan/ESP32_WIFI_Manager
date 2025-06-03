@@ -8,6 +8,9 @@
 extern "C" {
 #endif
 
+// Indicates if the ESP32-C6 is connected to a Wi-Fi network in STA mode
+extern bool wifi_manager_sta_connected;
+
 /**
  * @brief Initializes the WiFi subsystem and starts AP or STA mode,
  *        depending on whether credentials are found in NVS.

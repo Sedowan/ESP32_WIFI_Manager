@@ -24,6 +24,9 @@ static const char* TAG = "wifi_manager";
 char saved_ssid[MAX_SSID_LEN];
 char saved_pass[MAX_PASS_LEN];
 
+// Global variables accessible by other modules
+bool wifi_manager_sta_connected = false;
+
 /**
  * @brief Checks if WiFi credentials are stored in NVS.
  */
