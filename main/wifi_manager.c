@@ -12,8 +12,8 @@
 #include <string.h>
 #include <stdlib.h>
 
-#define WIFI_MANAGER_STA_ATTEMPT_DURATION_MS     (3 * 60 * 1000) // 3 minutes in AP-Mode
-#define WIFI_MANAGER_AP_IDLE_TIMEOUT_MS          (2 * 60 * 1000) // 2 minutes in STA-Mode
+#define WIFI_MANAGER_STA_ATTEMPT_DURATION_MS     (1 * 60 * 1000) // 3 minutes in AP-Mode
+#define WIFI_MANAGER_AP_IDLE_TIMEOUT_MS          (1 * 60 * 1000) // 2 minutes in STA-Mode
 #define WIFI_MANAGER_AP_CLIENT_CHECK_INTERVAL_MS (5 * 1000)      // 5 seconds interval to check clients connected in AP-Mode
 #define WIFI_MANAGER_STA_RECONNECT_TIMEOUT_SEC   (60)            // 60 seconds to check if still connected while in STA-Mode   
 #define WIFI_NAMESPACE "wifi_creds"
