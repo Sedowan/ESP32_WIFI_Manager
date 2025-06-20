@@ -69,31 +69,16 @@ void wifi_manager_save_wifi_credentials(const char* ssid, const char* password) 
  * @brief Deletes WiFi credentials from NVS.
  */
 void wifi_manager_delete_wifi_credentials(void) {
-    nvs_handle_t nvs_handle;
-    esp_err_t err = nvs_open(WIFI_NAMESPACE, NVS_READWRITE, &nvs_handle);
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to open NVS for deleting credentials: %s", esp_err_to_name(err));
-        return;
-    }
-
-    err = nvs_erase_key(nvs_handle, "wifi_ssid");
-    if (err != ESP_OK && err != ESP_ERR_NVS_NOT_FOUND) {
-        ESP_LOGW(TAG, "Failed to erase SSID: %s", esp_err_to_name(err));
-    }
-
-    err = nvs_erase_key(nvs_handle, "wifi_pass");
-    if (err != ESP_OK && err != ESP_ERR_NVS_NOT_FOUND) {
-        ESP_LOGW(TAG, "Failed to erase password: %s", esp_err_to_name(err));
-    }
-
-    err = nvs_commit(nvs_handle);
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Commit failed: %s", esp_err_to_name(err));
+    nvs_handle_t nvs;
+    if (nvs_open(WIFI_NAMESPACE, NVS_READWRITE, &nvs) == ESP_OK) {
+        nvs_erase_key(nvs, "wifi_ssid");
+        nvs_erase_key(nvs, "wifi_pass");
+        nvs_commit(nvs);
+        nvs_close(nvs);
+        ESP_LOGI(TAG, "WiFi credentials erased.");
     } else {
-        ESP_LOGI(TAG, "WiFi credentials deleted from NVS.");
+        ESP_LOGE(TAG, "Failed to erase WiFi credentials.");
     }
-
-    nvs_close(nvs_handle);
 }
 
 /**
@@ -344,6 +329,7 @@ esp_err_t wifi_manager_post_wifi_reset_handler(httpd_req_t *req)
     wifi_manager_delete_wifi_credentials();
     ESP_LOGI(TAG, "WiFi credentials reset via HTTP handler.");
     httpd_resp_send(req, "Credentials deleted. Please reboot.", HTTPD_RESP_USE_STRLEN);
+    esp_restart();
     return ESP_OK;
 }
 
