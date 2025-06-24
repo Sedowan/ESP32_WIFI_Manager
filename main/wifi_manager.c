@@ -3,7 +3,6 @@
 #include "esp_log.h"
 #include "esp_netif.h"
 #include "esp_event.h"
-#include "mdns.h"
 #include "nvs_flash.h"
 #include "nvs.h"
 #include "cJSON.h"
@@ -12,8 +11,9 @@
 #include <string.h>
 #include <stdlib.h>
 
-#define WIFI_MANAGER_STA_ATTEMPT_DURATION_MS     (1 * 60 * 1000) // 3 minutes in AP-Mode
-#define WIFI_MANAGER_AP_IDLE_TIMEOUT_MS          (1 * 60 * 1000) // 2 minutes in STA-Mode
+
+#define WIFI_MANAGER_STA_ATTEMPT_DURATION_MS     (1 * 60 * 1000) // 1 minutes in AP-Mode
+#define WIFI_MANAGER_AP_IDLE_TIMEOUT_MS          (1 * 60 * 1000) // 1 minutes in STA-Mode
 #define WIFI_MANAGER_AP_CLIENT_CHECK_INTERVAL_MS (5 * 1000)      // 5 seconds interval to check clients connected in AP-Mode
 #define WIFI_MANAGER_STA_RECONNECT_TIMEOUT_SEC   (60)            // 60 seconds to check if still connected while in STA-Mode   
 #define WIFI_NAMESPACE "wifi_creds"
@@ -27,6 +27,11 @@ char saved_pass[MAX_PASS_LEN];
 // Global variables accessible by other modules
 bool wifi_manager_sta_connected = false;
 
+int sta_mode_counter = 0;
+
+uint16_t ap_num = 0;
+wifi_ap_record_t *ap_records = NULL;
+
 /**
  * @brief Checks if WiFi credentials are stored in NVS.
  */
@@ -38,15 +43,20 @@ bool wifi_manager_wifi_credentials_exist(void) {
 
     len = sizeof(saved_ssid);
     err = nvs_get_str(nvs, "wifi_ssid", saved_ssid, &len);
+    if (err != ESP_OK || strlen(saved_ssid) == 0) {
+        nvs_close(nvs);
+        return false;
+    }
+    ESP_LOGW(TAG, "SSID aus NVS: '%s'", saved_ssid);
+    len = sizeof(saved_pass);
+    err = nvs_get_str(nvs, "wifi_pass", saved_pass, &len);
     if (err != ESP_OK) {
         nvs_close(nvs);
         return false;
     }
 
-    len = sizeof(saved_pass);
-    err = nvs_get_str(nvs, "wifi_pass", saved_pass, &len);
     nvs_close(nvs);
-    return err == ESP_OK;
+    return true;
 }
 
 /**
@@ -75,10 +85,18 @@ void wifi_manager_delete_wifi_credentials(void) {
         nvs_erase_key(nvs, "wifi_pass");
         nvs_commit(nvs);
         nvs_close(nvs);
-        ESP_LOGI(TAG, "WiFi credentials erased.");
+        memset(saved_ssid, 0, sizeof(saved_ssid));
+        memset(saved_pass, 0, sizeof(saved_pass));
+        ESP_LOGI(TAG, "WiFi credentials deleted");
     } else {
-        ESP_LOGE(TAG, "Failed to erase WiFi credentials.");
+        ESP_LOGE(TAG, "Failed to save WiFi credentials.");
     }
+    
+    wifi_config_t empty_config = {0};
+    esp_wifi_set_config(WIFI_IF_STA, &empty_config);
+
+    memset(saved_ssid, 0, sizeof(saved_ssid));
+    memset(saved_pass, 0, sizeof(saved_pass));
 }
 
 /**
@@ -90,14 +108,12 @@ void wifi_manager_connect_sta(const char *ssid, const char *password) {
         ESP_LOGW(TAG, "STA start prevented: SSID is empty.");
         return;
     }
+
     esp_wifi_stop();       // Safe to call, even when not running
     esp_wifi_deinit();     // Safe to call, resets WIFI-drivers
-    
-    
-    esp_err_t err = esp_wifi_scan_start(NULL, true);
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Scan start failed: %s", esp_err_to_name(err));
-    }
+
+    esp_netif_destroy_default_wifi(WIFI_IF_STA);  // für sauberen Neuaufbau
+    esp_netif_create_default_wifi_sta();
 
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
     esp_wifi_init(&cfg);
@@ -112,6 +128,7 @@ void wifi_manager_connect_sta(const char *ssid, const char *password) {
     esp_wifi_connect();
 
     ESP_LOGI(TAG, "Started STA mode with SSID: %s", ssid);
+
 }
 
 /**
@@ -134,8 +151,9 @@ void wifi_manager_start_ap(void) {
             .authmode = WIFI_AUTH_WPA_WPA2_PSK
         }
     };
-    esp_wifi_set_mode(WIFI_MODE_AP);
+    esp_wifi_set_mode(WIFI_MODE_APSTA);
     esp_wifi_set_config(WIFI_IF_AP, &ap_config);
+    sta_mode_counter = 0;
     esp_wifi_start();
     ESP_LOGI(TAG, "Started AP mode: SSID: ESP32-AP, PASS: esp32pass");
 }
@@ -149,25 +167,26 @@ void wifi_manager_stop_ap(void) {
 }
 
 /**
- * @brief Initializes mDNS for network discovery.
- */
-void wifi_manager_mdns_init(const char* hostname) {
-    if (mdns_init() == ESP_OK) {
-        mdns_hostname_set(hostname);
-        mdns_instance_name_set("ESP32 Web Server");
-        ESP_LOGI(TAG, "mDNS started: %s.local", hostname);
-    } else {
-        ESP_LOGE(TAG, "Failed to initialize mDNS.");
-    }
-}
-
-/**
  * @brief The main WiFi state/task machine. Handles STA/AP switching and all timing logic.
  * Keeps AP mode active as long as a client is connected.
  */
 static void wifi_manager_main_task(void *pvParameters) {
     while (1) {
+
+        esp_err_t err = esp_wifi_scan_start(NULL, true);
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "Scan start failed: %s", esp_err_to_name(err));
+        }
+
+        ESP_LOGI(TAG, "Boot: saved_ssid='%s'", saved_ssid);
+
         if (wifi_manager_wifi_credentials_exist()) {
+            ESP_LOGI(TAG, "Found WiFi credentials in NVS.");
+            if (strlen(saved_ssid) == 0) {
+                ESP_LOGW(TAG, "SSID is empty despite NVS entry. Skipping STA mode.");
+                goto start_apsta_mode;
+            }
+
             wifi_manager_connect_sta(saved_ssid, saved_pass);
 
             uint32_t elapsed_sta = 0;
@@ -176,6 +195,7 @@ static void wifi_manager_main_task(void *pvParameters) {
                 wifi_ap_record_t info;
                 if (esp_wifi_sta_get_ap_info(&info) == ESP_OK) {
                     ESP_LOGI(TAG, "Connected to WiFi. Remaining in STA mode.");
+                    wifi_manager_sta_connected = true;
                     connected = true;
                     break;
                 }
@@ -184,56 +204,62 @@ static void wifi_manager_main_task(void *pvParameters) {
             }
 
             if (connected) {
-                // Monitor STA connection: restart cycle if disconnected for too long
                 int lost_seconds = 0;
-                const int RECONNECT_TIMEOUT = WIFI_MANAGER_STA_RECONNECT_TIMEOUT_SEC;
                 while (1) {
                     wifi_ap_record_t info;
                     if (esp_wifi_sta_get_ap_info(&info) == ESP_OK) {
-                        // Still connected
                         lost_seconds = 0;
                     } else {
-                        // Connection lost!
                         lost_seconds++;
+                        wifi_manager_sta_connected = false;
                         ESP_LOGW(TAG, "WiFi connection lost for %d seconds.", lost_seconds);
-                        if (lost_seconds >= RECONNECT_TIMEOUT) {
-                            ESP_LOGW(TAG, "Connection lost > %d seconds. Restarting AP/STA cycle...", RECONNECT_TIMEOUT);
+                        sta_mode_counter++;
+                        if (lost_seconds >= WIFI_MANAGER_STA_RECONNECT_TIMEOUT_SEC) {
                             esp_wifi_disconnect();
                             esp_wifi_stop();
                             esp_wifi_deinit();
-                            break; // Return to main state machine: try STA again, then AP, etc.
+                            break;
                         }
                     }
-                    vTaskDelay(pdMS_TO_TICKS(1000)); // Check every second
+                    vTaskDelay(pdMS_TO_TICKS(1000));
+                    if (sta_mode_counter > 10) {
+                        goto start_apsta_mode;
+                    }
                 }
-                continue; // Loop back to main state machine
+                continue;
             }
 
-            ESP_LOGW(TAG, "STA connection failed. Switching to AP mode for user intervention.");
-            wifi_manager_start_ap();
-
-            uint32_t ap_idle_time = 0;
-            while (ap_idle_time < WIFI_MANAGER_AP_IDLE_TIMEOUT_MS) {
-                wifi_sta_list_t sta_list;
-                esp_wifi_ap_get_sta_list(&sta_list);
-
-                if (sta_list.num > 0) {
-                    ESP_LOGI(TAG, "AP client connected, pausing AP idle timer.");
-                    ap_idle_time = 0;
-                } else {
-                    ap_idle_time += WIFI_MANAGER_AP_CLIENT_CHECK_INTERVAL_MS;
-                }
-                vTaskDelay(pdMS_TO_TICKS(WIFI_MANAGER_AP_CLIENT_CHECK_INTERVAL_MS));
-            }
-
-            ESP_LOGI(TAG, "No AP clients for %d seconds, stopping AP and retrying STA.", WIFI_MANAGER_AP_IDLE_TIMEOUT_MS / 1000);
-            wifi_manager_stop_ap();
-
+            ESP_LOGW(TAG, "STA connection failed. Switching to AP mode.");
         } else {
-            ESP_LOGI(TAG, "No WiFi credentials stored, starting AP mode only.");
-            wifi_manager_start_ap();
-            vTaskDelay(pdMS_TO_TICKS(60 * 1000));
+            ESP_LOGI(TAG, "No WiFi credentials in NVS.");
         }
+
+start_apsta_mode:
+        
+        err = esp_wifi_scan_start(NULL, true);
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "Scan start failed: %s", esp_err_to_name(err));
+        }
+
+        wifi_manager_sta_connected = false;
+        wifi_manager_start_ap();
+
+        uint32_t ap_idle_time = 0;
+        while (ap_idle_time < WIFI_MANAGER_AP_IDLE_TIMEOUT_MS) {
+            wifi_sta_list_t sta_list;
+            esp_wifi_ap_get_sta_list(&sta_list);
+
+            if (sta_list.num > 0) {
+                ESP_LOGI(TAG, "AP client connected. Resetting AP idle timer.");
+                ap_idle_time = 0;
+            } else {
+                ap_idle_time += WIFI_MANAGER_AP_CLIENT_CHECK_INTERVAL_MS;
+            }
+            vTaskDelay(pdMS_TO_TICKS(WIFI_MANAGER_AP_CLIENT_CHECK_INTERVAL_MS));
+        }
+
+        ESP_LOGI(TAG, "No AP clients for %d seconds. Restarting cycle.", WIFI_MANAGER_AP_IDLE_TIMEOUT_MS / 1000);
+        wifi_manager_stop_ap();
     }
 }
 
@@ -242,13 +268,12 @@ void wifi_manager_start_main_task(void) {
 }
 
 esp_err_t wifi_manager_scan_get_wifi_handler(httpd_req_t *req) {
-    uint16_t ap_num = 0;
-    wifi_ap_record_t *ap_records = NULL;
-
+    
     esp_err_t err = esp_wifi_scan_start(NULL, true);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Scan start failed: %s", esp_err_to_name(err));
     }
+    
     esp_wifi_scan_get_ap_num(&ap_num);
 
     ap_records = malloc(sizeof(wifi_ap_record_t) * ap_num);
@@ -337,39 +362,85 @@ esp_err_t wifi_manager_post_wifi_handler(httpd_req_t *req) {
 
 esp_err_t wifi_manager_post_wifi_reset_handler(httpd_req_t *req)
 {
-    wifi_manager_delete_wifi_credentials();
     ESP_LOGI(TAG, "WiFi credentials reset via HTTP handler.");
-    httpd_resp_send(req, "Credentials deleted. Please reboot.", HTTPD_RESP_USE_STRLEN);
+
+    // Öffne gezielt den Namespace
+    nvs_handle_t nvs;
+    if (nvs_open("wifi_creds", NVS_READWRITE, &nvs) == ESP_OK) {
+        nvs_erase_all(nvs);
+        nvs_commit(nvs);
+        nvs_close(nvs);
+        ESP_LOGI(TAG, "Namespace 'wifi_creds' vollständig gelöscht.");
+    } else {
+        ESP_LOGE(TAG, "Konnte Namespace 'wifi_creds' nicht öffnen.");
+    }
+
+    // Strings im RAM löschen
+    memset(saved_ssid, 0, sizeof(saved_ssid));
+    memset(saved_pass, 0, sizeof(saved_pass));
+
+    // WiFi-Hardware sicher stoppen
+    esp_wifi_disconnect();
+    esp_wifi_stop();
+    esp_wifi_deinit();
+    esp_netif_destroy_default_wifi(WIFI_IF_STA);
+    wifi_manager_delete_wifi_credentials();
+    memset(saved_ssid, 0, sizeof(saved_ssid));
+    memset(saved_pass, 0, sizeof(saved_pass));
+    
+    httpd_resp_send(req, "WiFi credentials erased. Restarting...", HTTPD_RESP_USE_STRLEN);
+    
+    vTaskDelay(pdMS_TO_TICKS(250));
     esp_restart();
     return ESP_OK;
 }
+
 
 esp_err_t wifi_manager_get_wifi_status_handler(httpd_req_t *req) {
     wifi_mode_t mode;
     wifi_config_t conf;
     char ip[16] = "0.0.0.0";
+    char ssid[33] = "ESP32-AP"; // Standard-AP-Name
     bool connected = false;
 
     esp_wifi_get_mode(&mode);
     esp_wifi_get_config(ESP_IF_WIFI_STA, &conf);
 
     esp_netif_ip_info_t ip_info;
-    esp_netif_t *netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+    esp_netif_t *netif = NULL;
+
+    if (mode == WIFI_MODE_STA) {
+        // Reiner STA-Modus
+        strncpy(ssid, (const char*)conf.sta.ssid, sizeof(ssid) - 1);
+        netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+
+    } else if (mode == WIFI_MODE_APSTA) {
+        netif = esp_netif_get_handle_from_ifkey("WIFI_AP_DEF");
+    }
+
     if (netif && esp_netif_get_ip_info(netif, &ip_info) == ESP_OK) {
         snprintf(ip, sizeof(ip), IPSTR, IP2STR(&ip_info.ip));
         connected = ip_info.ip.addr != 0;
     }
 
     cJSON *root = cJSON_CreateObject();
-    cJSON_AddStringToObject(root, "mode", mode == WIFI_MODE_STA ? "station" : "accesspoint");
-    cJSON_AddStringToObject(root, "ssid", (const char *)conf.sta.ssid);
+
+    if (mode == WIFI_MODE_STA) {
+        cJSON_AddStringToObject(root, "mode", "Station");
+    } else if (mode == WIFI_MODE_APSTA) {
+        cJSON_AddStringToObject(root, "mode", "Accesspoint");
+    } else {
+        cJSON_AddStringToObject(root, "mode", "Unknown");
+    }
+
+    cJSON_AddStringToObject(root, "ssid", ssid);
     cJSON_AddStringToObject(root, "ip", ip);
     cJSON_AddBoolToObject(root, "connected", connected);
-    const char *response = cJSON_Print(root);
 
+    const char *response = cJSON_Print(root);
     httpd_resp_set_type(req, "application/json");
     httpd_resp_send(req, response, HTTPD_RESP_USE_STRLEN);
-    free((void *)response);
+    free((void*)response);
     cJSON_Delete(root);
 
     return ESP_OK;
