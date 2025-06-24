@@ -190,6 +190,7 @@ static void wifi_manager_main_task(void *pvParameters) {
                 goto start_apsta_mode;
             }
 
+            // Attempt to connect in STA mode
             wifi_manager_connect_sta(saved_ssid, saved_pass);
 
             uint32_t elapsed_sta = 0;
@@ -245,6 +246,7 @@ start_apsta_mode:
         }
 
         wifi_manager_sta_connected = false;
+        // Attempt to connect in AP mode
         wifi_manager_start_ap();
 
         uint32_t ap_idle_time = 0;

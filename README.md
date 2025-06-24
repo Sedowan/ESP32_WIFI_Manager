@@ -1,6 +1,6 @@
 # ESP32 WiFi Manager
 
-A minimal, responsive WiFi configuration manager for ESP32-C6 (and compatible ESP-IDF boards) based on Espressif v5.2.2.  
+A minimal, responsive WiFi configuration manager for ESP32-C6 (and compatible ESP-IDF boards) based on Espressif v5.4.1.  
 Provides a self-hosted web interface for scanning, connecting, and managing WiFi credentials — no firmware recompile required!
 
 ---
@@ -10,11 +10,11 @@ Provides a self-hosted web interface for scanning, connecting, and managing WiFi
 - Web-based configuration interface served directly by the ESP32
 - Scan for available WiFi networks (STA mode)
 - Connect to WiFi via browser — no hardcoded credentials required
-- Automatic Access Point (AP) mode if no credentials are stored or connection fails
+- Automatic Access Point (APSTA) mode if no credentials are stored or connection fails
 - Real-time status overview: WiFi mode, connection state, SSID, IP address
 - Reset stored WiFi credentials via the web interface
 - Credentials securely saved in NVS storage (see [Security](#security))
-- Robust STA/AP switching with timeout logic for connection monitoring
+- Robust STA/APSTA switching with timeout logic for connection monitoring
 
 ---
 
@@ -68,7 +68,7 @@ idf.py flash monitor
    - Reset WiFi credentials if needed
 
 4. **Normal Operation:**
-   - On successful STA connection, AP mode deactivates
+   - On successful STA connection, APSTA mode deactivates
    - Device switches to WiFi client mode and joins your network
    - If connection drops or fails repeatedly, fallback to AP mode occurs automatically
 
@@ -92,7 +92,7 @@ idf.py flash monitor
 - The configuration web interface has no authentication (intended for initial setup only)
 - You can extend security with:
   - Custom password protection for the web interface
-  - AP access restrictions (e.g., MAC filtering)
+  - APSTA access restrictions (e.g., MAC filtering)
 
 ---
 
@@ -100,6 +100,7 @@ idf.py flash monitor
 
 - **Can't find AP?** Ensure your device supports WPA2 AP mode, and SSID `ESP32-AP` is visible
 - **Web interface unresponsive?** Check serial output for errors, clear browser cache
+- **Web interface unresponsive?** Check if still connected to the Accesspoint
 
 ---
 
