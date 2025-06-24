@@ -3,6 +3,8 @@
 A minimal, responsive WiFi configuration manager for ESP32-C6 (and compatible ESP-IDF boards) based on Espressif v5.4.1.  
 Provides a self-hosted web interface for scanning, connecting, and managing WiFi credentials — no firmware recompile required!
 
+There will be no maintance on this project.
+
 ---
 
 ## Features
