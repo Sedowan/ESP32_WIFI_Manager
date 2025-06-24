@@ -11,5 +11,4 @@ idf_component_register(
         esp_netif
         esp_event
         json
-        mdns
 )

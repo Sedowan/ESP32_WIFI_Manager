@@ -1,109 +1,112 @@
 # ESP32 WiFi Manager
 
 A minimal, responsive WiFi configuration manager for ESP32-C6 (and compatible ESP-IDF boards) based on Espressif v5.2.2.  
-Provides a web interface for scanning, connecting, and managing WiFi credentials – all without recompiling firmware!
+Provides a self-hosted web interface for scanning, connecting, and managing WiFi credentials — no firmware recompile required!
 
 ---
 
 ## Features
 
+- Web-based configuration interface served directly by the ESP32
 - Scan for available WiFi networks (STA mode)
-- Connect to WiFi via web frontend (no hardcoded credentials)
-- Automatic fallback to Access Point (AP) mode if no credentials are stored
-- Reset (delete) WiFi credentials with one click
-- View connection status, SSID, mode, IP address in real time
-- Built-in web server serves a simple HTML/JavaScript frontend
-- Credentials securely stored in NVS (see [Security](#security))
-- Optional mDNS support for easy device discovery on the network
+- Connect to WiFi via browser — no hardcoded credentials required
+- Automatic Access Point (AP) mode if no credentials are stored or connection fails
+- Real-time status overview: WiFi mode, connection state, SSID, IP address
+- Reset stored WiFi credentials via the web interface
+- Credentials securely saved in NVS storage (see [Security](#security))
+- Robust STA/AP switching with timeout logic for connection monitoring
 
 ---
 
 ## Quickstart
 
-### 1. Clone and configure
+### 1. Clone and Configure
 
 ```sh
 git clone https://github.com/Sedowan/WIFI_Manager.git
 cd WIFI_Manager
 ```
 
-### 2. Install ESP-IDF (if not done)
+### 2. Install ESP-IDF
 
 Follow the official [ESP-IDF Getting Started Guide](https://docs.espressif.com/projects/esp-idf/en/latest/esp32/get-started/index.html).
 
-### 3. Add dependencies
+### 3. Dependencies
 
-Ensure you have the following ESP-IDF components enabled:
-- **esp_http_server**
-- **nvs_flash**
-- **espressif/mdns** (for mDNS functionality, optional but recommended)
+Ensure the following ESP-IDF components are available:
 
-If you use an `idf_component.yml`, add:
-
-```yaml
-dependencies:
-  espressif/mdns: "^1.0.2"
-```
+- **esp_http_server** — for serving the web interface
+- **nvs_flash** — for persistent credential storage
 
 ---
 
 ### 4. Build and Flash
 
 ```sh
-idf.py set-target esp32c6    # or your ESP32 variant
-idf.py menuconfig           # (optional) for project config
+idf.py set-target esp32c6    # or your compatible ESP32 variant
+idf.py menuconfig           # optional project configuration
 idf.py build
 idf.py flash monitor
 ```
 
 ---
 
-### 5. Usage
+## Usage Workflow
 
-- On first boot (or after WiFi reset), the device starts in **Access Point mode** (SSID: `ESP32-AP`, Password: `esp32pass`).
-- Connect to the AP, then open [`http://192.168.4.1`](http://192.168.4.1) in your browser.
-- Scan for networks or manually enter SSID and password, then click **Connect**.
-- On successful connection, the ESP32 will switch to STA mode and join your WiFi.
-- The web UI shows status, mode, and allows you to reset credentials anytime.
+1. **First Boot or Reset:**
+   - Device starts in **Access Point mode**  
+   - Default AP: SSID `ESP32-AP`, Password `esp32pass`
 
----
+2. **Connect and Configure:**
+   - Join the AP WiFi with your phone/laptop
+   - Open [`http://192.168.4.1`](http://192.168.4.1) in a browser
 
-## Security
+3. **Web Interface Functions:**
+   - Scan for available networks
+   - Enter SSID and password to connect
+   - View live status: mode, IP, SSID, connection state
+   - Reset WiFi credentials if needed
 
-- WiFi credentials are stored in NVS in plain text by default (ESP-IDF standard).
-- For production, enable **NVS Encryption**, **Flash Encryption**, and/or **Secure Boot** in your ESP-IDF project.
-- The web UI is intentionally simple and **not password-protected** (intended for initial device setup only).  
-  If you need authentication, consider adding a password field or restricting the AP by MAC address.
-
----
-
-## mDNS
-
-- To access your ESP32 via hostname (e.g. `esp32.local`), mDNS support is included.
-- Make sure the **espressif/mdns** component is available in your ESP-IDF setup.
+4. **Normal Operation:**
+   - On successful STA connection, AP mode deactivates
+   - Device switches to WiFi client mode and joins your network
+   - If connection drops or fails repeatedly, fallback to AP mode occurs automatically
 
 ---
 
-## File Structure
+## Project Structure
 
-- `main/wifi_manager.c/.h` — WiFi credential management logic
-- `main/web.c/.h`          — Embedded web frontend (HTML/JS as C array)
-- `main/main.c`            — Application entry point, HTTP server setup
+- `main/wifi_manager.c/.h` — Handles WiFi connection logic, NVS credential storage, AP/STA switching, and provides HTTP API endpoints
+- `main/web.c/.h` — Minimal HTML/JavaScript web interface served via embedded resources
+- `main/main.c` — Application entry point initializing WiFi manager and web server
+
+---
+
+## Security Considerations
+
+- Credentials stored in NVS are unencrypted by default (ESP-IDF behavior)
+- For production, consider enabling:
+  - **NVS Encryption**
+  - **Flash Encryption**
+  - **Secure Boot**
+- The configuration web interface has no authentication (intended for initial setup only)
+- You can extend security with:
+  - Custom password protection for the web interface
+  - AP access restrictions (e.g., MAC filtering)
 
 ---
 
 ## Troubleshooting
 
-- **Can't connect to AP?** Double-check your phone/laptop supports WPA2 APs, and SSID/Password matches.
-- **Can't find `/wifi_scan` or status doesn't update?** Clear browser cache, check ESP32 serial log for errors.
-- **Build error about `mdns`?** Add `espressif/mdns` to your dependencies as shown above.
+- **Can't find AP?** Ensure your device supports WPA2 AP mode, and SSID `ESP32-AP` is visible
+- **Web interface unresponsive?** Check serial output for errors, clear browser cache
 
 ---
 
 ## License
 
 MIT License.  
-See [LICENSE](LICENSE) for details.
+See [LICENSE](LICENSE) for full terms.
 
 ---
 
@@ -111,5 +114,6 @@ See [LICENSE](LICENSE) for details.
 
 - [Espressif ESP-IDF](https://github.com/espressif/esp-idf)
 - [cJSON](https://github.com/DaveGamble/cJSON)
-- [espressif/mdns](https://github.com/espressif/esp-protocols/tree/master/components/mdns)
-- [ChatGPT](https://chatgpt.com/)
+- [ChatGPT](https://chat.openai.com/)
+
+---

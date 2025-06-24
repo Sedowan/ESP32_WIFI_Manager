@@ -18,13 +18,6 @@ extern bool wifi_manager_sta_connected;
 void wifi_manager_init(void);
 
 /**
- * @brief Initializes mDNS with the given hostname.
- *
- * @param hostname The mDNS hostname (e.g. "esp32")
- */
-void wifi_manager_mdns_init(const char* hostname);
-
-/**
  * @brief HTTP GET handler: Scans for WiFi networks and returns a JSON array.
  *
  * Endpoint: /wifi_scan (method: GET)
@@ -59,9 +52,12 @@ void wifi_manager_connect_sta(const char *ssid, const char *password);
 void wifi_manager_start_ap(void);
 
 /**
- * @brief Checks if WiFi credentials (SSID and password) exist in NVS and loads them into memory.
+ * @brief Checks if valid WiFi credentials are present in NVS and loads them into RAM.
+ * 
+ * This function verifies if SSID and password exist in the non-volatile storage
+ * and populates the global variables `saved_ssid` and `saved_pass`.
  *
- * @return true if credentials are present, false otherwise
+ * @return true if valid credentials were found, false otherwise
  */
 bool wifi_manager_wifi_credentials_exist(void);
 
@@ -79,8 +75,13 @@ void wifi_manager_save_wifi_credentials(const char* ssid, const char* password);
 void wifi_manager_delete_wifi_credentials(void);
 
 /**
- * @brief The main WiFi state/task machine. Handles STA/AP switching and all timing logic.
- * Keeps AP mode active as long as a client is connected.
+ * @brief Starts the main WiFi Manager task which runs indefinitely.
+ * 
+ * This FreeRTOS task handles automatic switching between:
+ * - STA mode (Station/client) if credentials are present
+ * - APSTA mode (Access Point/STA) for fallback configuration
+ * 
+ * It monitors connection state, handles timeouts, and ensures a device is always reachable.
  */
 void wifi_manager_start_main_task(void);
 

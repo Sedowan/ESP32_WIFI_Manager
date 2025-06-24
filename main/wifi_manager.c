@@ -104,15 +104,17 @@ void wifi_manager_delete_wifi_credentials(void) {
  */
 void wifi_manager_connect_sta(const char *ssid, const char *password) {
     
+    // Prevent invalid attempt if SSID is missing
     if (ssid == NULL || strlen(ssid) == 0) {
         ESP_LOGW(TAG, "STA start prevented: SSID is empty.");
         return;
     }
 
+    // Clean up any existing WiFi state (safe to call even if not initialized)
     esp_wifi_stop();       // Safe to call, even when not running
     esp_wifi_deinit();     // Safe to call, resets WIFI-drivers
 
-    esp_netif_destroy_default_wifi(WIFI_IF_STA);  // für sauberen Neuaufbau
+    esp_netif_destroy_default_wifi(WIFI_IF_STA);  // for clean rebuild
     esp_netif_create_default_wifi_sta();
 
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
@@ -122,7 +124,7 @@ void wifi_manager_connect_sta(const char *ssid, const char *password) {
     strncpy((char*)wifi_config.sta.ssid, ssid, sizeof(wifi_config.sta.ssid));
     strncpy((char*)wifi_config.sta.password, password, sizeof(wifi_config.sta.password));
 
-    esp_wifi_set_mode(WIFI_MODE_STA);
+    esp_wifi_set_mode(WIFI_MODE_STA); // Create network interface for STA mode
     esp_wifi_set_config(WIFI_IF_STA, &wifi_config);
     esp_wifi_start();
     esp_wifi_connect();
@@ -173,6 +175,7 @@ void wifi_manager_stop_ap(void) {
 static void wifi_manager_main_task(void *pvParameters) {
     while (1) {
 
+        // Perform initial WiFi scan
         esp_err_t err = esp_wifi_scan_start(NULL, true);
         if (err != ESP_OK) {
             ESP_LOGE(TAG, "Scan start failed: %s", esp_err_to_name(err));
