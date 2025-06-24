@@ -86,11 +86,19 @@ void wifi_manager_delete_wifi_credentials(void) {
  */
 void wifi_manager_connect_sta(const char *ssid, const char *password) {
     
+    if (ssid == NULL || strlen(ssid) == 0) {
+        ESP_LOGW(TAG, "STA start prevented: SSID is empty.");
+        return;
+    }
     esp_wifi_stop();       // Safe to call, even when not running
     esp_wifi_deinit();     // Safe to call, resets WIFI-drivers
     
     
-    esp_netif_create_default_wifi_sta();
+    esp_err_t err = esp_wifi_scan_start(NULL, true);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Scan start failed: %s", esp_err_to_name(err));
+    }
+
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
     esp_wifi_init(&cfg);
 
@@ -237,7 +245,10 @@ esp_err_t wifi_manager_scan_get_wifi_handler(httpd_req_t *req) {
     uint16_t ap_num = 0;
     wifi_ap_record_t *ap_records = NULL;
 
-    esp_wifi_scan_start(NULL, true);
+    esp_err_t err = esp_wifi_scan_start(NULL, true);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Scan start failed: %s", esp_err_to_name(err));
+    }
     esp_wifi_scan_get_ap_num(&ap_num);
 
     ap_records = malloc(sizeof(wifi_ap_record_t) * ap_num);
