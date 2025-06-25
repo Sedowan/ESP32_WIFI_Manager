@@ -26,7 +26,7 @@ There will be no maintance on this project.
 
 ```sh
 git clone https://github.com/Sedowan/ESP32_WIFI_Manager.git
-cd WIFI_Manager
+cd ESP32_WIFI_Manager
 ```
 
 ### 2. Install ESP-IDF
