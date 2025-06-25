@@ -25,7 +25,7 @@ There will be no maintance on this project.
 ### 1. Clone and Configure
 
 ```sh
-git clone https://github.com/Sedowan/WIFI_Manager.git
+git clone https://github.com/Sedowan/ESP32_WIFI_Manager.git
 cd WIFI_Manager
 ```
 
